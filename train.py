@@ -51,6 +51,8 @@ def predict_block(model, target_block_number, pred_type):
     block_scores = torch.zeros(4)
     if "grad_var" in pred_type:
         block_scores = ft_param_utils.grad_var_scores(param_blocks_list)
+    elif "path_norm" in pred_type:
+        block_scores = ft_param_utils.path_norm_scores(model, param_blocks_list)
     return torch.argmax(block_scores).item() + 1
 
 
@@ -73,25 +75,13 @@ def optimizer_custom_zero_grad(model):
         param.grad = torch.zeros_like(param)
 
 
-def add_model_noise_to_block(model, block_number, random_degree):
-    with torch.no_grad():
-        if block_number > 0 and block_number <= 3:
-            for name, param in model.named_parameters():
-                if name.startswith("layer" + str(block_number)):
-                    param.add_(torch.randn(param.shape) * random_degree)
-        elif block_number == 4:
-            for name, param in model.named_parameters():
-                if name.startswith("bn") or name.startswith("fc"):
-                    param.add_(torch.randn(param.shape) * random_degree)
-
-
 def train():
     run = wandb.init()
     print(wandb.config)
 
     model = utils.get_model()
     register_model_hooks(model)
-    add_model_noise_to_block(model, wandb.config.noise_block, wandb.config.random_degree)
+    utils.add_model_noise_to_block(model, wandb.config.noise_block, wandb.config.random_degree)
     optimizer = torch.optim.Adam(model.parameters(), lr=wandb.config.lr)
     train_data, val_data = utils.get_data()
 
@@ -114,7 +104,12 @@ def train():
             block_preds.append(pred_block)
             optimizer.step()
 
+        print("predicted blocks: ", block_preds)
         block_acc = np.count_nonzero(np.array(block_preds) == wandb.config.noise_block) / len(block_preds)
+        block1 = np.count_nonzero(np.array(block_preds) == 1) / len(block_preds)
+        block2 = np.count_nonzero(np.array(block_preds) == 2) / len(block_preds)
+        block3 = np.count_nonzero(np.array(block_preds) == 3) / len(block_preds)
+        block4 = np.count_nonzero(np.array(block_preds) == 4) / len(block_preds)
         num_correct = torch.count_nonzero(torch.cat(train_correct)).item()
         train_loss = torch.mean(torch.tensor(train_losses, device=device)).item()
         train_acc = num_correct / len(torch.cat(train_correct))
@@ -143,7 +138,11 @@ def train():
                    "train_acc": train_acc,
                    "val_loss": val_loss,
                    "val_acc": val_acc,
-                   "block_acc": block_acc})
+                   "block_acc": block_acc,
+                   "block1": block1,
+                   "block2": block2,
+                   "block3": block3,
+                   "block4": block4})
 
 
 if __name__ == '__main__':

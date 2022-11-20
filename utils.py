@@ -33,6 +33,18 @@ def get_model(group_norm=8):
     return model
 
 
+def add_model_noise_to_block(model, block_number, random_degree):
+    with torch.no_grad():
+        if block_number > 0 and block_number <= 3:
+            for name, param in model.named_parameters():
+                if name.startswith("layer" + str(block_number)):
+                    param.add_(torch.randn(param.shape) * random_degree)
+        elif block_number == 4:
+            for name, param in model.named_parameters():
+                if name.startswith("bn") or name.startswith("fc"):
+                    param.add_(torch.randn(param.shape) * random_degree)
+
+
 # def get_train_data():
 #     dataset = CIFAR10(root='data',
 #                             train=True,
