@@ -61,7 +61,7 @@ def add_model_noise_to_block(model, block_number, random_degree):
 #                                           shuffle=True)
 #     return train_dataloader, val_dataloader
 
-def get_data(dataset="cifar10"):
+def get_data(dataset="cifar10", pred_type=None):
     NORM = ((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
     te_transforms = transforms.Compose([transforms.ToTensor(),
                                         transforms.Normalize(*NORM)])
@@ -73,6 +73,8 @@ def get_data(dataset="cifar10"):
 
     training, validation = torch.utils.data.random_split(dataset, [train_num, val_num],
                                                          generator=torch.Generator().manual_seed(42))
+    few_shot_train = None
+
     train_loader = data.DataLoader(training,
                                   batch_size=128,
                                   shuffle=True,
@@ -81,7 +83,8 @@ def get_data(dataset="cifar10"):
                                   batch_size=128,
                                   shuffle=False,
                                   num_workers=0)
-    return train_loader, val_loader
+    return train_loader, val_loader, few_shot_train
+
 
 def get_test_data_old(dataset, n_examples: Optional[int] = None):
     # dataset = load_dataset("cifar10", split="train")

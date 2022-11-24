@@ -2,6 +2,25 @@ import torch
 import tqdm
 import torch.nn.functional as F
 import copy
+import numpy as np
+
+
+def layer_cmp_scores(output_blocks_list, train_data):
+    _, y = train_data
+    classes = torch.unique(y)
+    output_errors = []
+    for block in output_blocks_list:
+        class_errors = []
+        for i in classes.tolist():
+            idxs = (y == i).nonzero(as_tuple=True)[0]
+            block_select = torch.index_select(block, 0, idxs)
+            block_select_norm = F.normalize(block_select)
+            mean_pt = torch.mean(block_select_norm, dim=0)
+            loss = F.mse_loss(block_select_norm, mean_pt)
+            class_errors.append(loss)
+        output_errors.append(np.mean(class_errors))
+    return torch.tensor(output_errors)
+
 
 def path_norm_scores(model, param_blocks_list):
     new_mdl = copy.deepcopy(model)

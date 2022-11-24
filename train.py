@@ -17,7 +17,7 @@ sweep_configuration = {
         'lr': {'values': [1e-3]}, #, 1e-4, 1e-5]},
         'noise_block': {'values': [1, 2, 3, 4]},
         'random_degree': {'values': [0.1]},
-        'pred_type': {'values': ["grad_var"]},
+        'pred_type': {'values': ["layer_cmp"]},
      }
 }
 
@@ -43,7 +43,7 @@ def register_model_hooks(model):
     model.fc.register_forward_hook(get_activation('layer4'))
 
 
-def predict_block(model, target_block_number, pred_type):
+def predict_block(model, target_block_number, pred_type, train_data, multipliers):
     if pred_type == "correct":
         return target_block_number
     param_blocks_list = ft_param_utils.get_all_param_blocks(model)
@@ -53,11 +53,35 @@ def predict_block(model, target_block_number, pred_type):
         block_scores = ft_param_utils.grad_var_scores(param_blocks_list)
     elif "path_norm" in pred_type:
         block_scores = ft_param_utils.path_norm_scores(model, param_blocks_list)
-    return torch.argmax(block_scores).item() + 1
+    elif "layer_cmp":
+        block_scores = ft_param_utils.layer_cmp_scores(output_blocks_list, train_data)
+    print("block", target_block_number, "scores: ", block_scores)
+    fixed_block_scores = block_scores * multipliers
+    print("block", target_block_number, "FIXED scores: ", fixed_block_scores)
+    return torch.argmax(fixed_block_scores).item() + 1
 
 
-def learn_and_freeze_model_params(model, target_block_number):
-    pred_block_number = predict_block(model, target_block_number, wandb.config.pred_type)
+def calibrate_model(model, train_data):
+    model.eval()
+    all_scores = []
+    for i, (x, y) in tqdm.tqdm(enumerate(train_data)):
+        model(x)
+        param_blocks_list = ft_param_utils.get_all_param_blocks(model)
+        output_blocks_list = [activation['layer' + str(i)] for i in range(1, 5)]
+        if "grad_var" in wandb.config.pred_type:
+            block_scores = ft_param_utils.grad_var_scores(param_blocks_list)
+        elif "path_norm" in wandb.config.pred_type:
+            block_scores = ft_param_utils.path_norm_scores(model, param_blocks_list)
+        elif "layer_cmp":
+            block_scores = ft_param_utils.layer_cmp_scores(output_blocks_list, (x, y))
+        all_scores.append(block_scores)
+    avgs = torch.mean(torch.cat([block.unsqueeze(1) for block in all_scores], dim=1), dim=1)
+    print("block avgs: ", avgs)
+    return 0.25 / avgs
+
+
+def learn_and_freeze_model_params(model, target_block_number, train_data, multipliers):
+    pred_block_number = predict_block(model, target_block_number, wandb.config.pred_type, train_data, multipliers)
     # print("predicted block: ", pred_block_number, " actual: ", target_block_number)
     for name, param in model.named_parameters():
         if (pred_block_number > 0 and pred_block_number <= 3) and name.startswith("layer" + str(pred_block_number)):
@@ -83,7 +107,10 @@ def train():
     register_model_hooks(model)
     utils.add_model_noise_to_block(model, wandb.config.noise_block, wandb.config.random_degree)
     optimizer = torch.optim.Adam(model.parameters(), lr=wandb.config.lr)
-    train_data, val_data = utils.get_data()
+    train_data, val_data, few_shot_train = utils.get_data(pred_type=wandb.config.pred_type)
+
+    # Calibrate so all equal
+    multipliers = calibrate_model(model, train_data)
 
     wandb.watch(model, log="all", log_freq=1)
     for epoch in range(wandb.config.epochs):
@@ -100,7 +127,7 @@ def train():
             _, predicted = pred_y.max(1)
             train_correct.append(predicted.eq(y).cpu())
             loss.backward()
-            pred_block = learn_and_freeze_model_params(model, wandb.config.noise_block)
+            pred_block = learn_and_freeze_model_params(model, wandb.config.noise_block, (x,y), multipliers)
             block_preds.append(pred_block)
             optimizer.step()
 
