@@ -17,6 +17,8 @@ from torch.utils.data.dataloader import DataLoader
 from torch.utils.data import random_split, Dataset
 from models.ResNet import ResNetCifar as ResNet
 import torchvision.transforms as transforms
+import mann
+import random
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
@@ -33,6 +35,10 @@ def get_model(group_norm=8):
     return model
 
 
+def get_inner_model(input_dim, num_shot=3, hidden_dim=64, num_classes=4):
+    return mann.MANN(input_dim, num_classes, num_shot + 1, hidden_dim).to(device)
+
+
 def add_model_noise_to_block(model, block_number, random_degree):
     with torch.no_grad():
         if block_number > 0 and block_number <= 3:
@@ -43,6 +49,7 @@ def add_model_noise_to_block(model, block_number, random_degree):
             for name, param in model.named_parameters():
                 if name.startswith("bn") or name.startswith("fc"):
                     param.add_(torch.randn(param.shape) * random_degree)
+    return model
 
 
 # def get_train_data():
