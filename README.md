@@ -12,5 +12,5 @@ Training prediction options:
 - `grad_var`: gradient variance
 - `path_norm`: path norm
 - `layer_cmp`: same label layer output comparison
-- 'inner_loop_full_step_mann': MANN inner model
-- 'inner_loop_full_step_mlp': MLP inner model
+- `inner_loop_full_step_mann`: MANN inner model
+- `inner_loop_full_step_mlp`: MLP inner model
