@@ -20,7 +20,7 @@ sweep_configuration = {
         'lr': {'values': [1e-3]}, #, 1e-4, 1e-5]},
         'noise_block': {'values': [1, 2, 3, 4]},
         'random_degree': {'values': [0.1]},
-        'pred_type': {'values': ["inner_loop_full_step"]},
+        'pred_type': {'values': ["inner_loop_full_step_mlp"]},
         'inner_batch': {'values': [4]}
      }
 }
@@ -54,14 +54,21 @@ def predict_block(model, target_block_number, pred_type, train_data, multipliers
     param_blocks_list = ft_param_utils.get_all_param_blocks(model)
     output_blocks_list = [activation['layer' + str(i)] for i in range(1, 5)]
     block_scores = torch.zeros(4)
-    if "grad_var" in pred_type:
+    if "grad_mag" in pred_type:
+        block_scores = ft_param_utils.grad_mag_scores(param_blocks_list)
+    elif "grad_var" in pred_type:
         block_scores = ft_param_utils.grad_var_scores(param_blocks_list)
     elif "path_norm" in pred_type:
         block_scores = ft_param_utils.path_norm_scores(model, param_blocks_list)
     elif "layer_cmp" in pred_type:
         block_scores = ft_param_utils.layer_cmp_scores(output_blocks_list, train_data)
-    elif "inner_loop" in pred_type:
+    elif "mann" in pred_type:
         block_scores = predict_inner_block(inner_model, output_blocks_list, train_data)
+    elif "mlp" in pred_type:
+        preds = torch.argmax(model.inner_forward(train_data[0]), dim=1)
+        block_scores = torch.zeros(4)
+        for i in range(4):
+            block_scores[i] = torch.count_nonzero(preds == i).item() / len(preds)
     print("block", target_block_number, "scores: ", block_scores)
     if "layer_cmp" in pred_type:
         block_scores = block_scores * multipliers
@@ -91,15 +98,21 @@ def calibrate_model(model, train_data):
 def learn_and_freeze_model_params(model, target_block_number, train_data, multipliers, inner_model):
     pred_block_number = predict_block(model, target_block_number, wandb.config.pred_type, train_data, multipliers, inner_model)
     # print("predicted block: ", pred_block_number, " actual: ", target_block_number)
+    freeze_model_params(model, pred_block_number)
+    return pred_block_number
+
+
+def freeze_model_params(model, unfrozen_block):
     for name, param in model.named_parameters():
-        if (pred_block_number > 0 and pred_block_number <= 3) and name.startswith("layer" + str(pred_block_number)):
+        if (unfrozen_block > 0 and unfrozen_block <= 3) and name.startswith("layer" + str(unfrozen_block)):
             # https://discuss.pytorch.org/t/parameters-with-requires-grad-false-are-updated-during-training/90096/9
             continue
-        elif (pred_block_number == 4) and (name.startswith("bn") or name.startswith("fc")):
+        elif (unfrozen_block == 4) and (name.startswith("bn") or name.startswith("fc")):
+            continue
+        elif name.startswith("inner_mlp"):
             continue
         else:
             param.grad = None
-    return pred_block_number
 
 
 def optimizer_custom_zero_grad(model):
@@ -113,29 +126,35 @@ def train():
 
     model = utils.get_model()
     orig_model = copy.deepcopy(model)
-    input_dim = 3 * 32 * 32 + 16 * 32 * 32 + 32 * 16 * 16 + 64 * 8 * 8 + 10
-    inner_model = utils.get_inner_model(input_dim)
+    inner_model = None
+    if "mann" in wandb.config.pred_type:
+        input_dim = 3 * 32 * 32 + 16 * 32 * 32 + 32 * 16 * 16 + 64 * 8 * 8 + 10
+        inner_model = utils.get_inner_model(input_dim)
     register_model_hooks(model)
     # if not "inner_loop" in wandb.config.pred_type:
     #     utils.add_model_noise_to_block(model, wandb.config.noise_block, wandb.config.random_degree)
     utils.add_model_noise_to_block(model, wandb.config.noise_block, wandb.config.random_degree)
     optimizer = torch.optim.Adam(model.parameters(), lr=wandb.config.lr)
-    inner_optimizer = torch.optim.Adam(inner_model.parameters(), lr=wandb.config.lr)
+    if "mann" in wandb.config.pred_type:
+        inner_optimizer = torch.optim.Adam(inner_model.parameters(), lr=wandb.config.lr)
 
     train_data, val_data, few_shot_train = utils.get_data(pred_type=wandb.config.pred_type)
 
     # Calibrate so all equal
     multipliers = calibrate_model(model, train_data)
+    if "mlp" in wandb.config.pred_type:
+        pretrain_mlp(orig_model, train_data)
 
     wandb.watch(model, log="all", log_freq=1)
     for epoch in range(wandb.config.epochs):
         train_correct = []
         train_losses = []
         block_preds = []
+        inner_accs = []
 
         model.train()
         for i, (x,y) in tqdm.tqdm(enumerate(train_data)):
-            if "inner_loop" in wandb.config.pred_type:
+            if "mann" in wandb.config.pred_type:
                 x_inner = x[:wandb.config.inner_batch, :, :, :]
                 x = x[wandb.config.inner_batch:, :, :, :]
                 y = y[wandb.config.inner_batch:]
@@ -144,7 +163,8 @@ def train():
                     model_copy = copy.deepcopy(orig_model)
                     model_copy_noisy = utils.add_model_noise_to_block(model_copy, i + 1, wandb.config.random_degree)
                     model_copies.append(register_model_hooks(model_copy_noisy))
-                inner_train(inner_model, model_copies, x_inner, inner_optimizer)
+                inner_acc = inner_train_mann(inner_model, model_copies, x_inner, inner_optimizer)
+                inner_accs.append(inner_acc)
 
             optimizer_custom_zero_grad(model)
             pred_y = model(x)
@@ -153,12 +173,19 @@ def train():
             _, predicted = pred_y.max(1)
             train_correct.append(predicted.eq(y).cpu())
             loss.backward()
-            pred_block = learn_and_freeze_model_params(model, wandb.config.noise_block, (x,y), multipliers, inner_model)
+            if wandb.config.pred_type != "none":
+                pred_block = learn_and_freeze_model_params(model, wandb.config.noise_block, (x,y), multipliers, inner_model)
+            else:
+                pred_block = 0
             block_preds.append(pred_block)
             optimizer.step()
-            if "inner_loop_full_step" in wandb.config.pred_type:
+            if "mann" in wandb.config.pred_type:
                 inner_optimizer.step()
 
+        if "mann" in wandb.config.pred_type:
+            inner_total_accs = np.sum(inner_accs) / len(inner_accs)
+            print("inner accs: ", inner_total_accs)
+            wandb.log({"inner accs: ": inner_total_accs})
         print("predicted blocks: ", block_preds)
         block_acc = np.count_nonzero(np.array(block_preds) == wandb.config.noise_block) / len(block_preds)
         block1 = np.count_nonzero(np.array(block_preds) == 1) / len(block_preds)
@@ -200,10 +227,11 @@ def train():
                    "block4": block4})
 
 
-def inner_train(inner_model, outer_model_copies, x, inner_optimizer, num_shots=3, train_steps=10):
+def inner_train_mann(inner_model, outer_model_copies, x, inner_optimizer, num_shots=3, train_steps=10):
     import time
 
     times = []
+    accs = []
     for step in range(train_steps):
         ## Sample Batch
         t0 = time.time()
@@ -212,11 +240,21 @@ def inner_train(inner_model, outer_model_copies, x, inner_optimizer, num_shots=3
         t1 = time.time()
 
         ## Train
-        _, ls = mann.train_step(i, l, inner_model, inner_optimizer)
+        pred, ls = mann.train_step(i, l, inner_model, inner_optimizer)
         t2 = time.time()
         print("[Inner] Loss/train", ls, step)
         wandb.log({"inner train loss": ls})
+        pred = torch.reshape(
+            pred, [-1, 4, 4, 4]
+        )
+        pred = torch.argmax(pred[:, -1, :, :], axis=2)
+        l = torch.argmax(l[:, -1, :, :], axis=2)
+        acc = pred.eq(l).sum().item() / 4
+        accs.append(acc)
         times.append([t1 - t0, t2 - t1])
+
+    avg_accs = np.sum(accs) / len(accs)
+    return avg_accs
 
         # ## Evaluate
         # if (step + 1) % config.eval_freq == 0:
@@ -241,6 +279,38 @@ def inner_train(inner_model, outer_model_copies, x, inner_optimizer, num_shots=3
         #     times = []
         #     # scheduler.step(tls)
         #     print(f"learning rate {optim.param_groups[0]['lr']}")
+
+
+def pretrain_mlp(model, train_data):
+    model_copies = []
+    for i in range(4):
+        model_copy = copy.deepcopy(model)
+        model_copy_noisy = utils.add_model_noise_to_block(model_copy, i + 1, wandb.config.random_degree)
+        model_copies.append(register_model_hooks(model_copy_noisy))
+
+    model.train()
+    optimizer = torch.optim.Adam(model.inner_mlp.parameters(), lr=wandb.config.lr)
+    freeze_model_params(model, 0)  # 0 is not a valid block so all original blocks will be frozen
+    for epoch in range(15):
+        blocks_acc = [[0], [0], [0], [0]]
+        for i, (x, y) in tqdm.tqdm(enumerate(train_data)):
+            model_cpy_idx = random.choice(range(4))
+            model_copies[model_cpy_idx].inner_forward(x)
+            out = model.bn(activation["layer3"])
+            out = model.relu(out)
+            out = model.avgpool(out)
+            out = out.view(out.size(0), -1)
+            inner_pred = model.inner_mlp(out)
+            loss = F.cross_entropy(inner_pred, torch.ones(inner_pred.shape[0], dtype=torch.int64)*model_cpy_idx)
+            loss.backward()
+            optimizer.step()
+            num_correct = torch.count_nonzero(torch.argmax(inner_pred, axis=1) == model_cpy_idx).item()
+            acc = num_correct / inner_pred.shape[0]
+            blocks_acc[model_cpy_idx].append(acc)
+        for i in range(4):
+            block_i_acc = np.sum(blocks_acc[i]) / (len(blocks_acc[i]) - 1)
+            print("Inner train acc block " + str(i+1), block_i_acc)
+            wandb.log({"Inner acc block " + str(i+1): block_i_acc})
 
 
 def predict_inner_block(inner_model, output_blocks_list, train_data):

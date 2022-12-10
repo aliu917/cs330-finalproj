@@ -31,7 +31,12 @@ def get_model(group_norm=8):
         ckpt = torch.load('models/ckpt.pth')
     else:
         ckpt = torch.load('models/ckpt.pth', map_location=torch.device('cpu'))
-    model.load_state_dict(ckpt['net'])
+
+    pretrained_dict = ckpt['net']
+    model_dict = model.state_dict()
+    pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in model_dict}
+    model_dict.update(pretrained_dict)
+    model.load_state_dict(model_dict)
     return model
 
 

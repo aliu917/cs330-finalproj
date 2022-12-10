@@ -67,6 +67,15 @@ class ResNetCifar(nn.Module):
         self.relu = nn.ReLU(inplace=True)
         self.avgpool = nn.AvgPool2d(8)
         self.fc = nn.Linear(64 * width, classes)
+        self.inner_mlp = nn.Sequential(
+            nn.Linear(64 * width, 128),
+            nn.ReLU(),
+            nn.Linear(128, 64),
+            nn.ReLU(),
+            nn.Linear(64, 32),
+            nn.ReLU(),
+            nn.Linear(32, 4)
+        )
 
         # Initialization
         for m in self.modules():
@@ -94,4 +103,16 @@ class ResNetCifar(nn.Module):
         x = self.avgpool(x)
         x = x.view(x.size(0), -1)
         x = self.fc(x)
+        return x
+
+    def inner_forward(self, x):
+        x = self.conv1(x)
+        x = self.layer1(x)
+        x = self.layer2(x)
+        x = self.layer3(x)
+        x = self.bn(x)
+        x = self.relu(x)
+        x = self.avgpool(x)
+        x = x.view(x.size(0), -1)
+        x = self.inner_mlp(x)
         return x

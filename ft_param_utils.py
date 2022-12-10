@@ -40,6 +40,15 @@ def path_norm_scores(model, param_blocks_list):
     return torch.tensor([out1sum, out2sum, out3sum, out4sum])
 
 
+def grad_mag_scores(param_blocks_list):
+    grad_mags = []
+    for param_block in param_blocks_list:
+        param_grads = [torch.flatten(param.grad) for param in param_block]
+        rgn = torch.norm(torch.cat(param_grads)) / torch.norm(torch.cat([param.flatten() for param in param_block]))
+        grad_mags.append(rgn)
+    return torch.tensor(grad_mags)
+
+
 def grad_var_scores(param_blocks_list):
     grad_vars = []
     for param_block in param_blocks_list:
