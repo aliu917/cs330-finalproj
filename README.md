@@ -14,3 +14,6 @@ Training prediction options:
 - `layer_cmp`: same label layer output comparison
 - `inner_loop_full_step_mann`: MANN inner model
 - `inner_loop_full_step_mlp`: MLP inner model
+
+Note: for full transparency, the original parts of the Resnet26 model (everything except for the inner_mlp additions) were taken from https://github.com/zhangmarvin/memo.
+This is the same model and checkpoint that was used by the original paper, which also borrowed the implementation from this source.
