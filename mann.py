@@ -34,8 +34,6 @@ class MANN(nn.Module):
         Returns:
             [B, K+1, N, N] predictions
         """
-        #############################
-        #### YOUR CODE GOES HERE ####
         train_split = torch.cat((input_images[:, :-1, :, :], input_labels[:, :-1, :, :]), dim=-1)
         b, k, n, dim = train_split.shape
         test_split = torch.cat((input_images[:, -1, :, :], torch.zeros(input_labels[:, -1, :, :].shape)), dim=-1)
@@ -45,7 +43,7 @@ class MANN(nn.Module):
         out1, _ = self.layer1(torch.tensor(input).float())
         out2, _ = self.layer2(out1)
         return out2.reshape(b, k+1, n, input_labels.shape[-1])
-        #############################
+
 
     def loss_function(self, preds, labels):
         """
@@ -58,12 +56,9 @@ class MANN(nn.Module):
         Note:
             Loss should only be calculated on the N test images
         """
-        #############################
-        #### YOUR CODE GOES HERE ####
         test_preds = preds[:, -1, :, :]
         test_labels = labels[:, -1, :, :]
         return F.cross_entropy(test_preds, test_labels)
-        #############################
 
 
 def train_step(images, labels, model, optim, eval=False):

@@ -25,21 +25,6 @@ ssl._create_default_https_context = ssl._create_unverified_context
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 epochs = 100
 
-# wandb.init(project="cs330-finalproj", entity="aliu917")
-# wandb.config = {
-#   "learning_rate": 0.001,
-#   "epochs": 100,
-#   "batch_size": 128
-# }
-# sweep_config = {
-#    'method': 'grid',
-#    'parameters': {
-#        'learning_rate': {
-#            'values': []
-#        }
-#    }
-# }
-
 
 def get_model():
     return ResNet.resnet26()

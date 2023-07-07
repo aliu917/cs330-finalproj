@@ -57,22 +57,6 @@ def add_model_noise_to_block(model, block_number, random_degree):
     return model
 
 
-# def get_train_data():
-#     dataset = CIFAR10(root='data',
-#                             train=True,
-#                             download=True)
-#     val_num = int(.2 * len(dataset))
-#     train_num = int(.8 * len(dataset))
-#     training, validation = torch.utils.data.random_split(dataset, [train_num, val_num],
-#                                                          generator=torch.Generator().manual_seed(42))
-#     train_dataloader = torch.utils.data.DataLoader(dataset=training,
-#                                            batch_size=128,
-#                                            shuffle=True)
-#     val_dataloader = torch.utils.data.DataLoader(dataset=validation,
-#                                           batch_size=128,
-#                                           shuffle=True)
-#     return train_dataloader, val_dataloader
-
 def get_data(dataset="cifar10", pred_type=None):
     NORM = ((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
     te_transforms = transforms.Compose([transforms.ToTensor(),

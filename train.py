@@ -17,7 +17,7 @@ sweep_configuration = {
     'parameters':
     {
         'epochs': {'values': [15]},
-        'lr': {'values': [1e-3]}, #, 1e-4, 1e-5]},
+        'lr': {'values': [1e-3, 1e-4, 1e-5]},
         'noise_block': {'values': [1, 2, 3, 4]},
         'random_degree': {'values': [0.1]},
         'pred_type': {'values': ["inner_loop_full_step_mlp"]},
@@ -255,30 +255,6 @@ def inner_train_mann(inner_model, outer_model_copies, x, inner_optimizer, num_sh
 
     avg_accs = np.sum(accs) / len(accs)
     return avg_accs
-
-        # ## Evaluate
-        # if (step + 1) % config.eval_freq == 0:
-        #     print("[Inner] " + "*" * 5 + "Iter " + str(step + 1) + "*" * 5)
-        #     i, l = next(test_loader)
-        #     i, l = i.to(device), l.to(device)
-        #     pred, tls = train_step(i, l, model, optim, eval=True)
-        #     print("[Inner] Train Loss:", ls.cpu().numpy(), "Test Loss:", tls.cpu().numpy())
-        #     wandb.log({"inner train loss": ls.cpu().numpy(),
-        #                "inner test loss": tls.cpu().numpy()})
-        #     pred = torch.reshape(
-        #         pred, [-1, config.num_shot + 1, config.num_classes, config.num_classes]
-        #     )
-        #     pred = torch.argmax(pred[:, -1, :, :], axis=2)
-        #     l = torch.argmax(l[:, -1, :, :], axis=2)
-        #     acc = pred.eq(l).sum().item() / (config.meta_batch_size * config.num_classes)
-        #     print("Test Accuracy", acc)
-        #     writer.add_scalar("Accuracy/test", acc, step)
-        #
-        #     times = np.array(times)
-        #     print(f"Sample time {times[:, 0].mean()} Train time {times[:, 1].mean()}")
-        #     times = []
-        #     # scheduler.step(tls)
-        #     print(f"learning rate {optim.param_groups[0]['lr']}")
 
 
 def pretrain_mlp(model, train_data):
